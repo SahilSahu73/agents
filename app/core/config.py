@@ -1,14 +1,7 @@
-import json
 import os
 from enum import Enum
 from pathlib import Path
-from typing import(
-    Any,
-    Dict,
-    Optional,
-    Union,
-    List
-)
+from pydantic import SecretStr
 from dotenv import load_dotenv
 
 
@@ -134,11 +127,12 @@ class Settings:
         self.ALLOWED_ORIGINS = parse_list_from_env("ALLOWED_ORIGINS", ["*"])
 
         # LLM & LangGraph
-        self.OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-        self.GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+        self.OPENAI_API_KEY = SecretStr(os.getenv("OPENAI_API_KEY", ""))
+        self.GROQ_API_KEY = SecretStr(os.getenv("GROQ_API_KEY", ""))
         self.GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-        self.DEFAULT_LLM_MODEL = os.getenv("DEFAULT_LLM_MODEL", "gpt-4o-mini")
+        self.DEFAULT_LLM_MODEL = os.getenv("DEFAULT_LLM_MODEL", "qwen/qwen3-32b")
         self.DEFAULT_LLM_TEMPERATURE = float(os.getenv("DEFAULT_LLM_TEMPERATURE", "0.2"))
+        self.DEFAULT_LLM_PROVIDER = os.getenv("DEFAULT_LLM_PROVIDER", "groq")
 
         # Agent specific settings
         self.MAX_TOKENS = int(os.getenv("MAX_TOKENS", "2000"))

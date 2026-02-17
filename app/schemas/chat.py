@@ -14,7 +14,7 @@ class Message(BaseModel):
     @classmethod
     def validate_content(cls, v: str) -> str:
         """
-        Represents a single message in the conversation history
+        Sanitization: Prevent basic XSS or injection attacks.
         """
         if re.search(r"<script.*?>.*?</script>", v, re.IGNORECASE | re.DOTALL):
             raise ValueError("Content contains potentially harmful script tags")

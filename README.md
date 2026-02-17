@@ -45,6 +45,28 @@ the key function `request.client.host` is responsible for identifying users.
 When the limit is exceeded, slowapi raises a RateLimitExceeded error.
 
 
+The Service Layer for AI agents
+Using API routes (Controllers)
+
+
+
 Markers:
 1. limiter.py -> parameter needs list[StrOrCallableStr] but passing list[str]
 did an AI fix list(settings.RATE_LIMITER_DEFAULT) which fixed the warning but still doubtful.
+
+
+Things I can improve:
+1. Context management part where they are using trim_message langchain function for resizing 
+the context passed to the LLM, I can improve it. 
+Can have another agent to evaluate the context and trim only the parts that don't add value for the future purpose.
+Alot can be added and improved, btu lets make everything work first and have a blueprint ready.
+
+2. For connection pooling here they are using sqlalchemy.pool.QueuePool
+We can use Pgbouncer or soemthing like this to scale it properly for produciton when users increase.
+Will need to write an implementation of this.
+
+3. LLM Registry -> we can have groups of models in the registry, separating reasoning and flash models.
+Based on the user selection or tasks assigned, model selection will be done.
+
+4. Have to make the long_term_memroy compatible with the other models.
+The way it is storing the context now is only for openai models, cannot put in other models.

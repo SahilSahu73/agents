@@ -1,4 +1,3 @@
-import re
 from datetime import UTC, datetime, timedelta
 from typing import Optional
 from jose import JWTError, jwt
@@ -32,6 +31,7 @@ def create_access_token(subject: str, expires_delta: Optional[timedelta] = None)
         "jti": sanitize_string(f"{subject}-{datetime.now(UTC).timestamp()}"),
     }
     encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+    logger.debug("Encoded_token_generated")
 
     return Token(access_token=encoded_jwt, expires_at=expire)
 
@@ -51,4 +51,5 @@ def verify_token(token: str) -> Optional[str]:
     
     except JWTError as e:
         # If the signature is invalid or token is expired, jose raises JWTError
+        logger.error("Invalid_or_expired_token", error=str(e))
         return None
