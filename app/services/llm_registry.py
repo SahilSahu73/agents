@@ -1,6 +1,6 @@
 from typing import Any, Dict, List, Optional
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import BaseMessage
+from langchain_core.runnables import Runnable
 from langchain_openai import ChatOpenAI
 from langchain_groq import ChatGroq
 
@@ -146,18 +146,29 @@ class LLMRegistry:
     }
 
     @classmethod
-    def get(cls, llm_provider: str, model_name: str) -> Optional[BaseChatModel]:
+    def get(cls, llm_provider: str, model_name: str, **kwargs) -> Optional[BaseChatModel | Runnable]:
         """Retrieve a specific model instance by name."""
 
         if llm_provider.lower() not in cls.LLMS.keys():
             logger.error("Invalid provider", provider=llm_provider)
             raise ValueError(f"Invalid Provider: {llm_provider}")
 
+        model_entry = None
         for entry in cls.LLMS[llm_provider]:
             if entry["name"] == model_name:
-                return entry["llm"]
-        # Default to first if not found
-        return cls.LLMS[llm_provider][0]["llm"]
+                model_entry = entry
+                break
+        
+        if not model_entry:
+            available_models = cls.get_all_names(llm_provider)
+            raise ValueError(
+                f"model '{model_name}' not found in registry. available models: {', '.join(available_models)}"
+            )
+        
+        logger.debug("using_the_provided_llm_instance",
+                     model_name=model_name)
+        # return the default instance
+        return model_entry["llm"]
     
     @classmethod
     def get_all_names(cls, llm_provider: Optional[str] = None) -> List[str]:
@@ -174,3 +185,18 @@ class LLMRegistry:
             for e in entries:
                 out.append(f"{provider}/{e["names"]}")
         return out
+    
+    @classmethod
+    def get_model_at_index(cls, index: int) -> Dict[str, Any]:
+        """
+        Get model entry at specific index.
+
+        Args;
+            index: Index of the model in the LLMs List
+
+        Returns:
+            Model entry dict
+        """
+        if 0 <= index < len(cls.get_all_names(settings.DEFAULT_LLM_PROVIDER)):
+            return cls.LLMS[settings.DEFAULT_LLM_PROVIDER][index]
+        return cls.LLMS["groq"][0]
