@@ -4,7 +4,7 @@ FROM python:3.13.2-slim
 WORKDIR /app
 
 # Set non-sensitive environment variables
-ARG APP_ENV=production
+ARG APP_ENV=development
 
 ENV APP_ENV=${APP_ENV} \
     PYTHONFAULTHANDLER=1 \
@@ -47,4 +47,4 @@ RUN echo "Using ${APP_ENV} environment"
 
 # Command to run the application
 ENTRYPOINT ["/app/scripts/docker-entrypoint.sh"]
-CMD ["/app/.venv/bin/uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["/app/.venv/bin/python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
