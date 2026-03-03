@@ -1,6 +1,6 @@
 import os
 from datetime import datetime
-from app.core.config import settings
+from app.core.system.config import settings
 
 
 def load_system_prompt(**kwargs) -> str:

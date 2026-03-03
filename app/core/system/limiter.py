@@ -1,6 +1,6 @@
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from app.core.config import settings
+from app.core.system.config import settings
 
 # Rate Limiter Configuration
 # we need to define how we identify a unique user -> IP address

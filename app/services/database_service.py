@@ -4,8 +4,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.pool import QueuePool
 from sqlmodel import Session, SQLModel, create_engine, select, col
 
-from app.core.config import Environment, settings
-from app.core.logging import logger
+from app.core.system.config import Environment, settings
+from app.core.system.logging import logger
 from app.models.session import Session as ChatSession
 from app.models.user import User
 
@@ -96,7 +96,8 @@ class DatabaseService:
         """Fetch user by email for login flow."""
         with Session(self.engine) as session:
             statement = select(User).where(User.email == email)
-            return session.exec(statement).first()
+            user = session.exec(statement).first()
+            return user
         
     async def delete_user_by_email(self, email: str) -> bool:
         """Delete a user by email.

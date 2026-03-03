@@ -2,9 +2,9 @@ from typing import cast
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage
 from langchain_core.messages import trim_messages as _trim_messages
-from app.core.config import settings
+from app.core.system.config import settings
 from app.schemas.chat import Message
-from app.core.logging import logger
+from app.core.system.logging import logger
 
 
 # LangGraph / LLM utilities

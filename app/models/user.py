@@ -26,7 +26,7 @@ class User(BaseModel, table=True):
 
     # Relationship: One user has many chat sessions
     sessions: List["Session"] = Relationship(back_populates="user")
-    def verify_passwords(self, password: str) -> bool:
+    def verify_password(self, password: str) -> bool:
         """
         Verifies a raw password against the stored hash.
         """

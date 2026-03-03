@@ -11,8 +11,8 @@ from tenacity import(
     wait_exponential,
 )
 
-from app.core.config import settings
-from app.core.logging import logger
+from app.core.system.config import settings
+from app.core.system.logging import logger
 from app.services.llm_registry import LLMRegistry
 
 

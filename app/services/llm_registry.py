@@ -4,8 +4,8 @@ from langchain_core.runnables import Runnable
 from langchain_openai import ChatOpenAI
 from langchain_groq import ChatGroq
 
-from app.core.config import settings
-from app.core.logging import logger
+from app.core.system.config import settings
+from app.core.system.logging import logger
 
 
 # LLM Registry

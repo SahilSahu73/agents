@@ -18,7 +18,7 @@ from typing import (
 )
 import structlog
 
-from app.core.config import (
+from app.core.system.config import (
     Environment,
     settings,
 )

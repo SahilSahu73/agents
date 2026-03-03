@@ -2,10 +2,10 @@ from datetime import UTC, datetime, timedelta
 from typing import Optional
 from jose import JWTError, jwt
 
-from app.core.config import settings
+from app.core.system.config import settings
 from app.schemas.auth import Token
 from app.utils.sanitizer import sanitize_string
-from app.core.logging import logger
+from app.core.system.logging import logger
 
 
 # JWT Authentication Utilities
