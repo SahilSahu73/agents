@@ -3,7 +3,7 @@ from typing import AsyncGenerator, Optional
 from urllib.parse import quote_plus
 from asgiref.sync import sync_to_async
 
-from langchain_core.messages import BaseMessage, ToolMessage, convert_to_openai_messages
+from langchain_core.messages import BaseMessage, ToolMessage, convert_to_messages, convert_to_openai_messages
 from langchain_core.language_models import BaseChatModel
 from langfuse.langchain import CallbackHandler
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
@@ -11,19 +11,19 @@ from langgraph.graph import END, StateGraph
 from langgraph.graph.state import Command, CompiledStateGraph
 from langgraph.types import StateSnapshot
 from langchain_core.runnables.config import RunnableConfig
-from langchain_core.messages import messages_from_dict
 
 from mem0 import AsyncMemory
 
 from psycopg import AsyncConnection, sql
 from psycopg_pool import AsyncConnectionPool
-from psycopg.rows import DictRow
+from psycopg.rows import DictRow, dict_row
 from app.core.system.config import settings, Environment
 from app.core.langgraph.tools import tools
 from app.core.system.logging import logger
 # include telemetry llm_inference_duration_seconds
 from app.core.prompts import load_system_prompt
 from app.schemas import GraphState, Message
+from app.services.llm_registry import LLMRegistry
 from app.services.llm_service import llm_service
 from app.utils import dump_messages, prepare_messages, process_llm_response
 
@@ -102,7 +102,7 @@ class LangGraphAgents:
                         "autocommit": True,
                         "connect_timeout": 5,
                         "prepare_threshold": None,
-                        "row_factory": DictRow,
+                        "row_factory": dict_row,
                     },
                 )
                 await self._connection_pool.open()
@@ -171,25 +171,54 @@ class LangGraphAgents:
         Returns:
             Command: Command object with updated state and next node to execute.
         """
-        # Get the current LLM instance for metrics
+        metadata = config.get("metadata", {})
+        selected_model_provider = metadata.get("model_provider") or settings.DEFAULT_LLM_PROVIDER
+        selected_model_name = metadata.get("model_name") or settings.DEFAULT_LLM_MODEL
+
         current_llm = self.llm_service.get_llm()
+        model_for_preparation: Optional[BaseChatModel] = None
+
+        if isinstance(current_llm, BaseChatModel):
+            model_for_preparation = current_llm
+
+        # Resolve explicit model selection early so message prep has a valid token counter LLM.
+        if metadata.get("model_provider") and metadata.get("model_name"):
+            requested_llm = LLMRegistry.get(selected_model_provider, selected_model_name)
+            if isinstance(requested_llm, BaseChatModel):
+                model_for_preparation = requested_llm
+
+        if model_for_preparation is None:
+            fallback_llm = LLMRegistry.get(settings.DEFAULT_LLM_PROVIDER, settings.DEFAULT_LLM_MODEL)
+            if isinstance(fallback_llm, BaseChatModel):
+                model_for_preparation = fallback_llm
+
+        if model_for_preparation is None:
+            raise ValueError("Unable to resolve a BaseChatModel for message preparation.")
+
         model_name = (
-            current_llm.name
-            if current_llm and hasattr(current_llm, "name")
-            else settings.DEFAULT_LLM_MODEL
+            model_for_preparation.name
+            if hasattr(model_for_preparation, "name")
+            else selected_model_name
         )
 
         SYSTEM_PROMPT = load_system_prompt(long_term_memory=state.long_term_memory)
-
-        if not isinstance(current_llm, BaseChatModel):
-            raise ValueError("LLM service returned a non-BaseChatModel. Unable to prepare messages.")
         
         # Prepare messages with system prompt
-        messages = prepare_messages(state.messages, current_llm, SYSTEM_PROMPT)
+        messages = prepare_messages(
+            state.messages,
+            model_for_preparation,
+            SYSTEM_PROMPT,
+            model_provider=selected_model_provider,
+            model_name=selected_model_name,
+        )
 
         try:
             # Use LLM service with automatic retries and circular fallback
-            response_message = await self.llm_service.call(messages_from_dict(dump_messages(messages)))
+            response_message = await self.llm_service.call(
+                list(convert_to_messages(dump_messages(messages))),
+                model_provider=selected_model_provider,
+                model_name=selected_model_name,
+            )
 
             # Process response to handle structured content blocks
             response_message = process_llm_response(response_message)
@@ -313,6 +342,8 @@ class LangGraphAgents:
         messages: list[Message],
         session_id: str,
         user_id: Optional[str] = None,
+        model_provider: Optional[str] = None,
+        model_name: Optional[str] = None,
     ) -> list[Message] | None:
         """Get a response from the LLM.
 
@@ -339,6 +370,8 @@ class LangGraphAgents:
                 "session_id": session_id,
                 "environment": settings.ENVIRONMENT.value,
                 "debug": settings.DEBUG,
+                "model_provider": model_provider,
+                "model_name": model_name,
             },
         }
 
@@ -362,7 +395,12 @@ class LangGraphAgents:
             logger.error(f"Error getting response: {str(e)}")
 
     async def get_stream_response(
-        self, messages: list[Message], session_id: str, user_id: Optional[str] = None
+        self,
+        messages: list[Message],
+        session_id: str,
+        user_id: Optional[str] = None,
+        model_provider: Optional[str] = None,
+        model_name: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
         """Get a stream response from the LLM.
 
@@ -384,6 +422,8 @@ class LangGraphAgents:
                 "session_id": session_id,
                 "environment": settings.ENVIRONMENT.value,
                 "debug": settings.DEBUG,
+                "model_provider": model_provider,
+                "model_name": model_name,
             },
         }
 
@@ -400,6 +440,7 @@ class LangGraphAgents:
         ) or "No relevant memory found."
 
         try:
+            last_emitted_content = ""
             async for event in self._graph.astream(
                 {"messages": dump_messages(messages), "long_term_memory": relevant_memory},
                 config,
@@ -410,7 +451,25 @@ class LangGraphAgents:
                     if "messages" in event and event["messages"]:
                         last_message = event["messages"][-1]
                         if hasattr(last_message, "content"):
-                            yield last_message.content
+                            message_type = getattr(last_message, "type", "")
+                            message_role = getattr(last_message, "role", "")
+                            if message_type not in ("ai", "assistant") and message_role != "assistant":
+                                continue
+
+                            content = last_message.content
+                            if not isinstance(content, str):
+                                continue
+
+                            if content.startswith(last_emitted_content):
+                                chunk = content[len(last_emitted_content):]
+                            elif content != last_emitted_content:
+                                chunk = content
+                            else:
+                                chunk = ""
+
+                            if chunk:
+                                yield chunk
+                                last_emitted_content = content
                 except Exception as token_error:
                     logger.error("Error processing token", error=str(token_error), session_id=session_id)
                     # Continue with next token even if current one fails

@@ -37,15 +37,74 @@ services:
     environment:
       - APP_ENV=${APP_ENV:-development}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-supersecretkeythatshouldbechnagedforproduction}
+    command:
+      - /bin/bash
+      - -lc
+      - |
+        if [ "${APP_ENV:-development}" = "development" ]; then
+          exec /app/.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/app
+        else
+          exec /app/.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+        fi
     depends_on:
       db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=5).getcode() == 200 else 1)",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 10s
+    restart: on-failure
+    networks:
+      - monitoring
+
+  # Streamlit Frontend Service
+  streamlit:
+    build:
+      context: .
+      args:
+        APP_ENV: ${APP_ENV:-development}
+    command:
+      - /app/.venv/bin/streamlit
+      - run
+      - /app/streamlit_app.py
+      - --server.address=0.0.0.0
+      - --server.port=8501
+      - --server.runOnSave=true
+      - --server.fileWatcherType=poll
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./app:/app/app
+      - ./logs:/app/logs
+      - ./streamlit_app.py:/app/streamlit_app.py
+    env_file:
+      - .env.${APP_ENV:-development}
+    environment:
+      - APP_ENV=${APP_ENV:-development}
+      - STREAMLIT_API_BASE_URL=http://app:8000/api/v1
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://localhost:8501/_stcore/health', timeout=5).getcode() == 200 else 1)",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     restart: on-failure
     networks:
       - monitoring

@@ -35,7 +35,7 @@ cd "$PROJECT_ROOT"
 
 if [ -f "$ENV_FILE" ]; then
   echo "Running docker compose with env file $ENV_FILE"
-  APP_ENV=$ENV docker compose --env-file "$ENV_FILE" up -d --build db app
+  APP_ENV=$ENV docker compose --env-file "$ENV_FILE" up -d --build db app streamlit
 else
-  APP_ENV=$ENV docker compose up -d --build db app
+  APP_ENV=$ENV docker compose up -d --build db app streamlit
 fi

@@ -183,7 +183,7 @@ class LLMRegistry:
         out: List[str] = []
         for provider, entries in cls.LLMS.items():
             for e in entries:
-                out.append(f"{provider}/{e["names"]}")
+                out.append(f"{provider}/{e['name']}")
         return out
     
     @classmethod

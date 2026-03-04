@@ -22,15 +22,33 @@ from app.core.system.limiter import limiter
 from app.core.system.logging import logger
 from app.core.system.telemetry import llm_stream_duration_seconds
 from app.models.session import Session
+from app.services.llm_registry import LLMRegistry
 from app.schemas.chat import (
     ChatRequest,
     ChatResponse,
+    ModelInfo,
+    ModelsResponse,
     Message,
     StreamResponse,
 )
 
 router = APIRouter()
 agent = LangGraphAgents()
+
+
+@router.get("/models", response_model=ModelsResponse)
+async def get_models():
+    models: list[ModelInfo] = []
+    for provider, entries in LLMRegistry.LLMS.items():
+        for entry in entries:
+            models.append(
+                ModelInfo(
+                    provider=provider,
+                    name=entry["name"],
+                    extra_details=str(entry.get("extra_details", "")),
+                )
+            )
+    return ModelsResponse(models=models)
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -65,9 +83,11 @@ async def chat(
         # Delegating execution to our LangGraph Agent
         # session.id becomes the "thread_id" for graph persistence
         result = await agent.get_response(
-            chat_request.messages, 
-            session.id, 
+            chat_request.messages,
+            session.id,
             user_id=str(session.user_id),
+            model_provider=chat_request.model_provider,
+            model_name=chat_request.model_name,
         )
         if result is None:
             logger.error("No_response_generated_from_agent", session_id=session.id)
@@ -124,22 +144,55 @@ async def chat_stream(
                 full_response = ""
 
                 current_llm = agent.llm_service.get_llm()
-                model_name = (
+                active_model_name = (
                     current_llm.name
                     if current_llm and hasattr(current_llm, "name")
                     else settings.DEFAULT_LLM_MODEL
                 )
+                requested_model = chat_request.model_name or active_model_name
+                requested_provider = chat_request.model_provider or settings.DEFAULT_LLM_PROVIDER
 
-                with llm_stream_duration_seconds.labels(model=model_name).time():
+                start_response = StreamResponse(
+                    content="",
+                    done=False,
+                    event="start",
+                    model_provider=requested_provider,
+                    model_name=requested_model,
+                )
+                yield f"data: {json.dumps(start_response.model_dump())}\n\n"
+
+                with llm_stream_duration_seconds.labels(model=active_model_name).time():
                     async for chunk in agent.get_stream_response(
-                        chat_request.messages, session.id, user_id=str(session.user_id)
+                        chat_request.messages,
+                        session.id,
+                        user_id=str(session.user_id),
+                        model_provider=chat_request.model_provider,
+                        model_name=chat_request.model_name,
                     ):
                         full_response += chunk
-                        response = StreamResponse(content=chunk, done=False)
+                        response = StreamResponse(
+                            content=chunk,
+                            done=False,
+                            event="chunk",
+                            model_provider=requested_provider,
+                            model_name=requested_model,
+                        )
                         yield f"data: {json.dumps(response.model_dump())}\n\n"
 
                 # Send final message indicating completion
-                final_response = StreamResponse(content="", done=True)
+                current_llm = agent.llm_service.get_llm()
+                final_model_name = (
+                    current_llm.name
+                    if current_llm and hasattr(current_llm, "name")
+                    else requested_model
+                )
+                final_response = StreamResponse(
+                    content="",
+                    done=True,
+                    event="done",
+                    model_provider=requested_provider,
+                    model_name=final_model_name,
+                )
                 yield f"data: {json.dumps(final_response.model_dump())}\n\n"
 
             except Exception as e:
@@ -149,7 +202,7 @@ async def chat_stream(
                     error=str(e),
                     exc_info=True,
                 )
-                error_response = StreamResponse(content=str(e), done=True)
+                error_response = StreamResponse(content=str(e), done=True, event="error")
                 yield f"data: {json.dumps(error_response.model_dump())}\n\n"
 
         return StreamingResponse(event_generator(), media_type="text/event-stream")

@@ -28,18 +28,18 @@ dev:
 	@echo "Starting server in development environment"
 	@bash -c "source scripts/set_env.sh development && uv run uvicorn app.main:app --reload --port 8000 --loop uvloop"
 
-# # Evaluation commands
-# eval:
-# 	@echo "Running evaluation with interactive mode"
-# 	@bash -c "source scripts/set_env.sh ${ENV:-development} && python -m evals.main --interactive"
+# Evaluation commands
+eval:
+	@echo "Running evaluation with interactive mode"
+	@bash -c "source scripts/set_env.sh ${ENV:-development} && python -m evals.main --interactive"
 
-# eval-quick:
-# 	@echo "Running evaluation with default settings"
-# 	@bash -c "source scripts/set_env.sh ${ENV:-development} && python -m evals.main --quick"
+eval-quick:
+	@echo "Running evaluation with default settings"
+	@bash -c "source scripts/set_env.sh ${ENV:-development} && python -m evals.main --quick"
 
-# eval-no-report:
-# 	@echo "Running evaluation without generating report"
-# 	@bash -c "source scripts/set_env.sh ${ENV:-development} && python -m evals.main --no-report"
+eval-no-report:
+	@echo "Running evaluation without generating report"
+	@bash -c "source scripts/set_env.sh ${ENV:-development} && python -m evals.main --no-report"
 
 lint:
 	ruff check .

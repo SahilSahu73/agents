@@ -70,3 +70,29 @@ Based on the user selection or tasks assigned, model selection will be done.
 
 4. Have to make the long_term_memroy compatible with the other models.
 The way it is storing the context now is only for openai models, cannot put in other models.
+
+## Streamlit Chat Frontend
+
+Added a Streamlit UI in `streamlit_app.py` to interact with the API.
+
+Run:
+
+```bash
+streamlit run streamlit_app.py
+```
+
+The UI supports:
+- login/register
+- session creation
+- model loading from `/api/v1/chatbot/models`
+- streaming chat via `/api/v1/chatbot/chat/stream`
+- runtime event panel for request and SSE event visibility
+
+### Docker Compose
+
+The Streamlit frontend runs as a separate `streamlit` service (recommended practice).
+
+- API: `http://localhost:8000`
+- Streamlit UI: `http://localhost:8501`
+
+`streamlit` starts only after `app` is healthy via `depends_on` health condition.

@@ -1,5 +1,5 @@
 import re
-from typing import List, Literal
+from typing import List, Literal, Optional
 from typing_extensions import Self
 from pydantic import BaseModel, Field, field_validator
 
@@ -9,7 +9,7 @@ class Message(BaseModel):
     Represents a single message in the conversation history.
     """
     role: Literal["user", "assistant", "system"] = Field(..., description="Who sent the message")
-    content: str = Field(..., description="The message content", min_length=1, max_length=3000)
+    content: str = Field(..., description="The message content", min_length=1, max_length=50000)
     @field_validator("content")
     @classmethod
     def validate_content(cls, v: str) -> str:
@@ -26,6 +26,8 @@ class ChatRequest(BaseModel):
     Payload sent to the /chat endpoint
     """
     messages: List[Message] = Field(..., min_length=1)
+    model_provider: Optional[str] = Field(default=None, description="Optional LLM provider override")
+    model_name: Optional[str] = Field(default=None, description="Optional LLM model override")
 
 class ChatResponse(BaseModel):
     """
@@ -39,3 +41,16 @@ class StreamResponse(BaseModel):
     """
     content: str = Field(default="")
     done: bool = Field(default=False)
+    event: str = Field(default="chunk")
+    model_provider: Optional[str] = Field(default=None)
+    model_name: Optional[str] = Field(default=None)
+
+
+class ModelInfo(BaseModel):
+    provider: str
+    name: str
+    extra_details: str = ""
+
+
+class ModelsResponse(BaseModel):
+    models: List[ModelInfo]
