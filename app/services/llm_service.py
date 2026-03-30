@@ -24,14 +24,17 @@ class LLMService:
     def __init__(self):
         self._llm: Optional[BaseChatModel | Runnable] = None
         self._current_model_index: int = 0
+        self._current_provider: str = settings.DEFAULT_LLM_PROVIDER
+        self._tools: List = []
 
         # Find index of default model in registry
         all_names = LLMRegistry.get_all_names(settings.DEFAULT_LLM_PROVIDER)
 
         # Initialize with the default model from settings
         try:
-            self._llm = LLMRegistry.get(settings.DEFAULT_LLM_PROVIDER, settings.DEFAULT_LLM_MODEL)
+            self._llm = self._resolve_llm(settings.DEFAULT_LLM_PROVIDER, settings.DEFAULT_LLM_MODEL)
             self._current_model_index = all_names.index(settings.DEFAULT_LLM_MODEL)
+            self._current_provider = settings.DEFAULT_LLM_PROVIDER
 
             logger.info("llm_service_initialised",
                         default_model=settings.DEFAULT_LLM_MODEL,
@@ -42,19 +45,36 @@ class LLMService:
         except (ValueError, Exception) as e:
             # Fallback Safety
             self._current_model_index = 0
-            self._llm = LLMRegistry.LLMS[settings.DEFAULT_LLM_PROVIDER][0]["llm"]
+            self._current_provider = settings.DEFAULT_LLM_PROVIDER
+            self._llm = self._bind_tools_to_llm(
+                LLMRegistry.LLMS[settings.DEFAULT_LLM_PROVIDER][0]["llm"]
+            )
             logger.warning("default_model_not_found_using_first",
                            requested=settings.DEFAULT_LLM_MODEL,
                            using=all_names[0] if all_names else "none",
                            error=str(e))
 
-    def _switch_to_next_model(self) -> bool:
+    def _bind_tools_to_llm(self, llm: BaseChatModel | Runnable) -> BaseChatModel | Runnable:
+        if self._tools and hasattr(llm, "bind_tools"):
+            return llm.bind_tools(self._tools)
+        return llm
+
+    def _resolve_llm(
+        self,
+        provider: str,
+        model_name: str,
+        **kwargs,
+    ) -> BaseChatModel | Runnable:
+        llm = LLMRegistry.get(provider, model_name, **kwargs)
+        return self._bind_tools_to_llm(llm)
+
+    def _switch_to_next_model(self, provider: Optional[str] = None) -> bool:
         """
         Circular Fallback: Switches to the next available model in the registry.
         Returns True if Successful
         """
         try:
-            provider = settings.DEFAULT_LLM_PROVIDER
+            provider = provider or self._current_provider
             next_index = (self._current_model_index + 1) % len(LLMRegistry.LLMS[provider])
             next_model_entry = LLMRegistry.LLMS[provider][next_index]
 
@@ -65,7 +85,8 @@ class LLMService:
                 to_model=next_model_entry["name"],
             )
             self._current_model_index = next_index
-            self._llm = next_model_entry["llm"]
+            self._current_provider = provider
+            self._llm = self._bind_tools_to_llm(next_model_entry["llm"])
 
             logger.info("model_switched", new_model=next_model_entry["name"], new_index=next_index)
             return True
@@ -134,23 +155,24 @@ class LLMService:
         Raises:
             RuntimeError: If all models fail after retries
         """
+        active_provider = model_provider or self._current_provider or settings.DEFAULT_LLM_PROVIDER
+
         if model_provider and model_name:
             try:
-                self._llm = LLMRegistry.get(model_provider, model_name, **model_kwargs)
+                self._llm = self._resolve_llm(model_provider, model_name, **model_kwargs)
                 # update index to match the requested model
                 all_names = LLMRegistry.get_all_names(model_provider)
                 try:
                     self._current_model_index = all_names.index(model_name)
                 except ValueError:
                     pass
+                self._current_provider = model_provider
                 logger.info("using_requested_model", model=model_name, has_custom_kwargs=bool(model_kwargs))
             except ValueError as e:
                 logger.error("requested_model_not_found", model_name=model_name, error=str(e))
                 raise
 
-
-        provider = settings.DEFAULT_LLM_PROVIDER
-        total_models = len(LLMRegistry.LLMS[provider])
+        total_models = len(LLMRegistry.LLMS[active_provider])
         models_tried = 0
         starting_index = self._current_model_index
         last_error = None
@@ -165,7 +187,7 @@ class LLMService:
                 last_error = e
                 # If we exhausted retries for this model, log and switch
                 models_tried += 1
-                current_model_name = LLMRegistry.LLMS[provider][self._current_model_index]["name"]
+                current_model_name = LLMRegistry.LLMS[active_provider][self._current_model_index]["name"]
                 logger.error(
                     "llm_call_failed_after_retries",
                     model=current_model_name,
@@ -177,12 +199,12 @@ class LLMService:
                 if models_tried >= total_models:
                     logger.error("all_models_failed",
                                  models_tried=models_tried,
-                                 starting_model=LLMRegistry.LLMS[provider][starting_index]["name"])
+                                 starting_model=LLMRegistry.LLMS[active_provider][starting_index]["name"])
                     # We tried everything. The world is probably ending.
                     break
 
                 # Switch to next model in circular fashion
-                if not self._switch_to_next_model():
+                if not self._switch_to_next_model(active_provider):
                     logger.error("failed_to_switch_to_next_model")
                     break
 
@@ -193,8 +215,9 @@ class LLMService:
     
     def bind_tools(self, tools: List) -> "LLMService":
         """Bind tools to the current LLM instance"""
-        if self._llm and isinstance(self._llm, BaseChatModel):
-            self._llm = self._llm.bind_tools(tools)
+        self._tools = tools
+        if self._llm and hasattr(self._llm, "bind_tools"):
+            self._llm = self._llm.bind_tools(self._tools)
             logger.debug("tools_bound_to_llm", tool_count=len(tools))
         return self
     

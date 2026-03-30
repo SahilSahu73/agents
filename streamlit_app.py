@@ -129,10 +129,10 @@ def selected_model() -> tuple[str | None, str | None]:
     return provider, model_name
 
 
-def stream_chat() -> Generator[str, None, None]:
+def stream_chat(turn_messages: list[dict[str, str]]) -> Generator[str, None, None]:
     provider, model_name = selected_model()
     payload = {
-        "messages": st.session_state.get("messages", []),
+        "messages": turn_messages,
         "model_provider": provider,
         "model_name": model_name,
     }
@@ -244,7 +244,7 @@ def render_chat_page() -> None:
             with st.chat_message("assistant"):
                 try:
                     with st.spinner("Generating response..."):
-                        streamed = st.write_stream(stream_chat())
+                        streamed = st.write_stream(stream_chat([{"role": "user", "content": prompt}]))
                         if isinstance(streamed, str):
                             final_text = streamed
                         else:

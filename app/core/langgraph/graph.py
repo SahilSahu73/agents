@@ -45,6 +45,56 @@ class LangGraphAgents:
                     model=settings.DEFAULT_LLM_MODEL,
                     environment=settings.ENVIRONMENT.value)
 
+    @staticmethod
+    def _extract_tool_calls(message: BaseMessage) -> list[dict]:
+        """Return parsed tool calls regardless of provider-specific storage."""
+        tool_calls = getattr(message, "tool_calls", None)
+        if tool_calls:
+            return tool_calls
+
+        additional_kwargs = getattr(message, "additional_kwargs", {}) or {}
+        fallback_tool_calls = additional_kwargs.get("tool_calls", [])
+        return fallback_tool_calls if isinstance(fallback_tool_calls, list) else []
+
+    async def _get_incremental_messages(
+        self,
+        session_id: str,
+        messages: list[Message],
+    ) -> list[Message]:
+        """Strip chat history that is already persisted for the session."""
+        if not messages or self._graph is None:
+            return messages
+
+        state: StateSnapshot = await sync_to_async(self._graph.get_state)(
+            config={"configurable": {"thread_id": session_id}}
+        )
+
+        if not state.values or "messages" not in state.values:
+            return messages
+
+        persisted_messages = self.__process_messages(state.values["messages"])
+        prefix_length = 0
+        max_prefix = min(len(messages), len(persisted_messages))
+
+        while prefix_length < max_prefix:
+            incoming = messages[prefix_length]
+            persisted = persisted_messages[prefix_length]
+            if incoming.role != persisted.role or incoming.content != persisted.content:
+                break
+            prefix_length += 1
+
+        if prefix_length:
+            logger.info(
+                "stripped_persisted_messages_from_request",
+                session_id=session_id,
+                stripped_count=prefix_length,
+                incoming_count=len(messages),
+                persisted_count=len(persisted_messages),
+            )
+
+        incremental_messages = messages[prefix_length:]
+        return incremental_messages or messages
+
     async def _long_term_memory(self) -> AsyncMemory:
         """Lazy-load the mem0ai memory client with pgvector configuration."""
         if self.memory is None:
@@ -231,12 +281,11 @@ class LangGraphAgents:
                 environment=settings.ENVIRONMENT.value,
             )
 
-            # Determine next node based on whether there are tool calls
-            # tool_calls are stored in additional_kwargs for most LLM_responses
-            tool_calls = response_message.additional_kwargs.get("tool_calls", [])
+            # Determine next node based on whether there are tool calls.
+            tool_calls = self._extract_tool_calls(response_message)
             logger.debug("response_message_type", 
                          msg_type=type(response_message).__name__, 
-                         has_tool_calls=hasattr(response_message, "tool_calls"))
+                         has_tool_calls=bool(tool_calls))
             
             if tool_calls:
                 goto = "tool_call"
@@ -266,7 +315,7 @@ class LangGraphAgents:
             Command: Command object with updated messages and routing back to chat.
         """
         outputs = []
-        for tool_call in state.messages[-1].tool_calls:
+        for tool_call in self._extract_tool_calls(state.messages[-1]):
             tool_result = await self.tools_by_name[tool_call["name"]].ainvoke(tool_call["args"])
             outputs.append(
                 ToolMessage(
@@ -293,7 +342,7 @@ class LangGraphAgents:
                 graph_builder.add_edge("tool_call", "chat")
                 graph_builder.add_conditional_edges(
                     "chat",
-                    lambda state: "tool_call" if state.messages[-1].additional_kwargs.get("tool_calls") else END,
+                    lambda state: "tool_call" if self._extract_tool_calls(state.messages[-1]) else END,
                     {"tool_call": "tool_call", END: END}
                 )
                 graph_builder.set_entry_point("chat")
@@ -375,13 +424,14 @@ class LangGraphAgents:
             },
         }
 
+        incoming_messages = await self._get_incremental_messages(session_id, messages)
         relevant_memory = (
-            await self._get_relevant_memory(user_id, messages[-1].content)
+            await self._get_relevant_memory(user_id, incoming_messages[-1].content)
         ) or "No relevant memory found."
 
         try:
             response = await self._graph.ainvoke(
-                input={"messages": dump_messages(messages), "long_term_memory": relevant_memory},
+                input={"messages": dump_messages(incoming_messages), "long_term_memory": relevant_memory},
                 config=config,
             )
             # Run memory update in background without blocking the response
@@ -435,14 +485,15 @@ class LangGraphAgents:
             logger.error("graph_creation_failed_unable_to_get_response", session_id=session_id)
             return
 
+        incoming_messages = await self._get_incremental_messages(session_id, messages)
         relevant_memory = (
-            await self._get_relevant_memory(user_id, messages[-1].content)
+            await self._get_relevant_memory(user_id, incoming_messages[-1].content)
         ) or "No relevant memory found."
 
         try:
             last_emitted_content = ""
             async for event in self._graph.astream(
-                {"messages": dump_messages(messages), "long_term_memory": relevant_memory},
+                {"messages": dump_messages(incoming_messages), "long_term_memory": relevant_memory},
                 config,
                 stream_mode="values",
             ):

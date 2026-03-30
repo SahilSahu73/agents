@@ -4,6 +4,7 @@ Logging configuration and setup for the app
 Structured logging config using structlog, with environment-specific formatters and handlers.
 It supports both -> console friendly dev logging and JSON-formatted prod logging.
 """
+
 import json
 import logging
 import sys
@@ -48,7 +49,7 @@ def clear_context() -> None:
 
 def get_context() -> Dict[str, Any]:
     """Get the current logging context.
-    
+
     Returns:
         Dict[str, Any]: Current context dictionary
     """
@@ -57,7 +58,7 @@ def get_context() -> Dict[str, Any]:
 
 def add_context_to_event_dict(logger: Any, method_name: str, event_dict: Dict[str, Any]) -> Dict[str, Any]:
     """Add Context variables to the event dictionary
-    
+
     This processor adds any bound context variables to each log event.
 
     Args:
@@ -76,7 +77,7 @@ def add_context_to_event_dict(logger: Any, method_name: str, event_dict: Dict[st
 
 def get_log_file_path() -> Path:
     """Get the current log file path based on date and environment.
-    
+
     Returns:
         Path: The path to the log file
     """
@@ -110,11 +111,11 @@ class JsonlFileHandler(logging.Handler):
             }
             # in the documentation of logging.LogRecord there is no "extra" parameter
             if hasattr(record, "extra"):
-                log_entry.update(record.extra) # type: ignore
+                log_entry.update(record.extra)  # type: ignore
 
             with open(self.file_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(log_entry) + "\n")
-        
+
         except Exception:
             self.handleError(record)
 
@@ -125,7 +126,7 @@ class JsonlFileHandler(logging.Handler):
 
 def get_structlog_processors(include_file_info: bool = True) -> List[Any]:
     """Get the Structlog processors based on configuration.
-    
+
     Args:
         include_file_info: Whether to include file information in the logs
 
@@ -159,7 +160,7 @@ def get_structlog_processors(include_file_info: bool = True) -> List[Any]:
                 }
             )
         )
-    
+
     # Add environment info
     processors.append(lambda _, __, event_dict: {**event_dict, "environment": settings.ENVIRONMENT.value})
 
@@ -168,7 +169,7 @@ def get_structlog_processors(include_file_info: bool = True) -> List[Any]:
 
 def setup_logging() -> None:
     """Configure structlog with different formatters based on environment.
-    
+
     In development: pretty console output
     In staging/production: Structured JSON logs
     """
@@ -186,7 +187,8 @@ def setup_logging() -> None:
     # Get shared processors
     shared_processors = get_structlog_processors(
         # include detailed file info only in development and test
-        include_file_info=settings.ENVIRONMENT in [Environment.DEVELOPMENT, Environment.TEST]
+        include_file_info=settings.ENVIRONMENT
+        in [Environment.DEVELOPMENT, Environment.TEST]
     )
 
     # configure standard logging
@@ -235,3 +237,4 @@ logger.info(
     log_format=settings.LOG_FORMAT,
     debug=settings.DEBUG,
 )
+
